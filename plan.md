@@ -115,21 +115,185 @@ Draw a sequence diagram for each in PlantUML. Keep the `.puml` files in the repo
 
 ## 8. Architecture
 
-Four layers, inside out:
+We follow *Clean Architecture* by Robert C. Martin.
+The main idea: the app is built in rings. Inner rings hold the rules.
+Outer rings hold the details (Swing, HTTP, files). Details can change. Rules should not.
 
-1. **Entities**: Terrain, Ball, Scene, Vector2D. No Swing, no API code.
-2. **Use cases**: one interactor per use case. Talks only to interfaces.
-3. **Interface adapters**: controllers, presenters, view models.
-4. **Frameworks**: Swing views, API calls, file reading and writing.
+### 8.1 The four layers (inside out)
 
-Key rules:
-- Use cases never call the API or files directly. They call a data access interface.
-  Example: `TerrainDataAccess` with `getHeights(points)`.
-  The real version calls Open-Meteo. A fake version returns fixed numbers for tests.
-- The physics sits behind a `PhysicsEngine` interface with `step(scene, dt)`.
-  We can swap in a better engine later. This is the Strategy pattern.
-- The frame loop is just a Swing Timer calling the Step controller about 60 times a second.
-  So moving balls goes through the same layers as everything else.
+| Layer | Book name | What goes here | Our classes |
+|---|---|---|---|
+| 1 | Entities | Core rules that would be true in any app | `Terrain`, `Ball`, `Scene`, `Vector2D`, `PhysicsEngine` |
+| 2 | Use cases | What the app does, one class per action | `LoadTerrainInteractor`, `DropBallInteractor`, `StepInteractor`, `SaveSceneInteractor`, ... |
+| 3 | Interface adapters | Convert data between use cases and the outside | controllers, presenters, view models |
+| 4 | Frameworks and drivers | Tools we don't own | Swing views, Open-Meteo HTTP calls, JSON files, `Main` |
+
+### 8.2 The Dependency Rule (the one rule that matters most)
+
+**Source code dependencies only point inward.**
+
+- An inner class never names an outer class. No `import` of anything outward.
+- Entities import nothing from our other layers.
+- Use cases import entities only. No `javax.swing`, no `java.net.http`, no `org.json`.
+- Interface adapters import use cases and entities. No `javax.swing` here either.
+- Only layer 4 imports Swing, HTTP, or JSON libraries.
+
+When an inner layer needs something from outside (load heights, show a result),
+it **declares an interface it owns**, and the outer layer implements it.
+This is the Dependency Inversion Principle and it is how we cross every boundary.
+
+Quick check in code review: open the `import` lines. If any arrow points outward, reject the PR.
+
+### 8.3 Package layout
+
+```
+src/main/java/
+  entity/                      layer 1
+    Terrain.java  Ball.java  Scene.java  Vector2D.java
+    PhysicsEngine.java         interface: step(scene, dt)
+    SimplePhysicsEngine.java   our section 9 rules
+  use_case/                    layer 2, one sub-package per use case
+    load_terrain/
+      LoadTerrainInputBoundary.java    interface, called by the controller
+      LoadTerrainInputData.java        plain data in
+      LoadTerrainInteractor.java       implements the input boundary
+      LoadTerrainOutputBoundary.java   interface, implemented by the presenter
+      LoadTerrainOutputData.java       plain data out
+      LoadTerrainDataAccessInterface.java  interface, implemented in data_access
+    drop_ball/   step/   save_scene/   load_scene/   (same shape)
+  interface_adapter/           layer 3
+    ViewManagerModel.java
+    load_terrain/
+      LoadTerrainController.java
+      LoadTerrainPresenter.java
+      LoadTerrainState.java    what the screen shows (strings, numbers)
+    simulation/
+      SimulationViewModel.java
+      SimulationState.java
+    ...
+  data_access/                 layer 4
+    OpenMeteoTerrainDataAccess.java   real HTTP calls
+    FileSceneDataAccess.java          JSON save/load
+    InMemorySceneDataAccess.java      holds the current Scene while the app runs
+  view/                        layer 4
+    SearchPanel.java  SimulationPanel.java  ControlsPanel.java
+  app/                         layer 4, the "Main component"
+    AppBuilder.java  Main.java
+src/test/java/
+  use_case/...                 interactor tests with fake data access
+  entity/...                   physics and terrain math tests
+```
+
+### 8.4 How one use case flows (example: UC1 Load terrain)
+
+```
+SearchPanel (view)
+  -> LoadTerrainController          builds LoadTerrainInputData from text fields
+  -> LoadTerrainInputBoundary       (interface)
+  -> LoadTerrainInteractor          the rules: validate, split line into 100 points,
+                                    ask data access for heights, build Terrain, put it in Scene
+       -> LoadTerrainDataAccessInterface   (interface, owned by the use case)
+            <- OpenMeteoTerrainDataAccess  (layer 4 implements it)
+  -> LoadTerrainOutputBoundary      (interface)
+  -> LoadTerrainPresenter           turns OutputData into LoadTerrainState
+  -> SimulationViewModel            fires a property change
+  -> SimulationPanel (view)         repaints
+```
+
+Notice the arrows of control go out and back, but every **source code** arrow points inward.
+The interactor calls the presenter only through `OutputBoundary`, so it never knows Swing exists.
+
+Every use case must have all of these pieces:
+- `InputData` and `OutputData`: plain Java objects. No entities passed out to the view.
+  The presenter gets numbers and strings, not a `Ball`.
+- `InputBoundary` and `OutputBoundary`: interfaces.
+- One `Interactor`: the only place business logic lives.
+- One `DataAccessInterface`: only the methods this use case needs.
+- One `Controller`, one `Presenter`, and a `State` in a `ViewModel`.
+- A success path and a fail path in the presenter (`prepareSuccessView`, `prepareFailView`).
+
+### 8.5 Rules for each layer
+
+**Entities**
+- Pure Java. Can be tested with nothing but JUnit.
+- Hold the physics and terrain math (`heightAt`, `slopeAt`). That is our core rule set.
+- `PhysicsEngine` is an interface here; `SimplePhysicsEngine` is the default.
+  We can swap in a better one later (Strategy pattern, Open/Closed Principle).
+
+**Use cases**
+- One interactor per user action. It does one job (Single Responsibility).
+- Gets everything through its constructor: data access, presenter, physics engine.
+  It never calls `new` on an outer class.
+- No Swing types, no `Exception` from HTTP leaking out. Catch at the data access
+  layer and throw our own exception (for example `TerrainUnavailableException`, declared in the use case package).
+
+**Interface adapters**
+- Controllers are thin. They only copy UI input into `InputData` and call the interactor.
+- Presenters are thin. They only format `OutputData` into `State` (round numbers, build messages).
+- View models hold state and notify listeners. No logic.
+
+**Frameworks and drivers**
+- Views are humble: they read the view model and draw, and forward clicks to a controller.
+  No physics, no API calls, no `if` logic about the rules.
+- Data access classes implement the use case interfaces. All HTTP and JSON parsing stays here.
+- If we swap Open-Meteo for another API, or JSON for a database, only this layer changes.
+
+### 8.6 The Main component (wiring)
+
+The book calls `Main` the dirtiest component. It is the only place that knows every concrete class.
+`AppBuilder` creates everything and plugs it together:
+
+```java
+new AppBuilder()
+    .addSimulationView()
+    .addLoadTerrainUseCase()
+    .addDropBallUseCase()
+    .addStepUseCase()
+    .addSaveSceneUseCase()
+    .build();
+```
+
+Each lead adds one `addXxxUseCase()` method. That keeps merge conflicts small.
+
+### 8.7 The simulation loop
+
+- A Swing `Timer` lives in the view layer (it is a framework detail).
+- Each tick it calls `StepController.execute(dt)`, about 60 times a second.
+- `StepInteractor` asks `PhysicsEngine` to move the balls, then calls the presenter.
+- So moving balls goes through the same layers as every other action. No shortcuts from the timer to the entities.
+
+### 8.8 Shared state between use cases
+
+Several use cases need the current `Scene` (drop ball, step, save).
+We keep it in one `InMemorySceneDataAccess` object that implements each use case's small interface
+(`DropBallDataAccessInterface`, `StepDataAccessInterface`, ...).
+Each interface only lists the methods that use case needs (Interface Segregation Principle).
+
+### 8.9 SOLID, mapped to our code
+
+| Principle | Where we show it |
+|---|---|
+| Single Responsibility | One interactor per use case; controller, presenter, view each do one job |
+| Open/Closed | New physics engine or new data source = new class, no edits to interactors |
+| Liskov Substitution | Fake data access and real data access are fully interchangeable in tests |
+| Interface Segregation | One small data access interface per use case, not one big one |
+| Dependency Inversion | Interactors depend on interfaces they own; outer layers implement them |
+
+### 8.10 Testing
+
+- Interactor tests use a fake data access class and a fake presenter that records what it got.
+  No network, no Swing, no files.
+- Aim for every line in each interactor covered, including the fail path.
+- Entity tests check the math: slope sign, ball stops in a valley, ball never goes under the ground.
+
+### 8.11 PR review checklist (architecture)
+
+- [ ] No outward imports (check `import` lines against 8.2).
+- [ ] No Swing, HTTP, or JSON code outside `view/`, `data_access/`, `app/`.
+- [ ] Entities are not passed to presenters or views. Only `OutputData` crosses.
+- [ ] Logic lives in the interactor or entity, not the controller, presenter, or view.
+- [ ] New use case has all the pieces in 8.4 and an interactor test.
+- [ ] Wiring added only in `AppBuilder`.
 
 ## 9. Physics (we keep it very simple)
 
