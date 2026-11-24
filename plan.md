@@ -1,10 +1,19 @@
 # 3D Terrain Physics Sim
 
-Project name: TerrainSim? TerrainPhys? idk
+Project name: Terrain Physics Simulator
 
-> **Changed on 2026-11-16:** we moved from a 2D side view to 3D terrain,
-> and terrain now comes from an LLM instead of only real elevation data.
-> The old 2D plan is in git history (commit `8204cce`).
+## Current implementation
+
+This document describes the target design. Proposed classes and flows below are not all implemented yet.
+
+| Area | Implemented | Remaining work |
+|---|---|---|
+| Terrain | `Terrain`, `TerrainFeature`, `TerrainBuilder`, offline hills/city samples | External terrain source, asynchronous loading UI, validation and error handling for source responses |
+| Object dropping | `BallFactory`, `drop_object` use case and interface adapters | Preset list, drop-speed slider, mini-map and application wiring |
+| Simulation | `SimplePhysicsEngine`, play/step/stop interactors, pause through `ScenePresenter`, starting snapshot for stop | Speed UI and rewind history/use case |
+| Persistence and rendering | JSON save/load, file validation, Swing 3D renderer, camera movement | Integration with terrain generation and dropping UI |
+
+The running app opens on `SampleTerrains.hills()` (48 × 48, two-metre spacing) with one bowling ball. The flat 16 × 16 preview remains a debugging helper. The current drop package is named `drop_object`, and play/step/stop share the `simulation` package; names in the target layout below describe future structure.
 
 ## 1. What we are building
 
@@ -33,7 +42,7 @@ The user can play, pause, stop (reset), rewind, and change speed, and save the s
 
 ## 3. APIs
 
-**LLM API (main)**
+**LLM API**
 - Turns the user's prompt into a terrain description in JSON (see section 13).
 - The system prompt limits it to our shape types and sizes.
   Example: when asked for a city, it only uses flat ground and blocks.
@@ -41,16 +50,12 @@ The user can play, pause, stop (reset), rewind, and change speed, and save the s
 - The API key lives in an environment variable `LLM_API_KEY`. **Never commit a key.**
 - The same prompt can give different terrain each time. That is fine. Save the scene to keep one.
 
-**Open-Meteo Elevation API (stretch)**
-- Docs: https://open-meteo.com/en/docs/elevation-api
-- Real terrain behind the same interface as the LLM source. Only if we have time.
-- Up to 100 points per call, so a 32 x 32 grid needs about 11 calls.
-- If we use it, we must credit Copernicus and Open-Meteo in the app and README.
+The LLM is the only planned external terrain source. Real-world place search, elevation import, and weather APIs are outside scope. The provider and model still need to be selected; keep provider-specific HTTP and response parsing inside `LlmTerrainSource`.
 
 ## 4. Requirements Check
 
 - Java Swing GUI: yes. Draw the 3D terrain, mini-map, and objects on JPanels.
-- External API: yes. LLM API (plus Open-Meteo as a stretch).
+- External API: yes. LLM API for terrain descriptions.
 - Data persistence: yes. Save and load scenes as JSON files.
 - One user story per person: yes. Section 6.
 - Clean Architecture + SOLID: yes. Section 8.
@@ -124,7 +129,6 @@ the presenter, the UI part that triggers it, and the UI update after it.
 4. App checks the description and builds a Terrain with TerrainBuilder.
 5. App clears the old balls, pauses the sim, and draws the new terrain.
 - Error case: LLM fails, times out, or returns bad JSON. Show a message, keep the old terrain.
-- Stretch: "Load real place" uses Open-Meteo through the same data access interface.
 
 **UC2: Drop object (B)**
 1. User scrolls the object list and picks a preset.
@@ -166,7 +170,7 @@ Outer rings hold the details (Swing, HTTP, files, the LLM). Details can change. 
 | 1 | Entities | Core rules that would be true in any app | `Terrain`, `TerrainFeature`, `TerrainBuilder`, `Ball`, `ObjectPreset`, `Scene`, `SceneSnapshot`, `Vector3D`, `PhysicsEngine` |
 | 2 | Use cases | What the app does, one class per action | `GenerateTerrainInteractor`, `DropBallInteractor`, `StepInteractor`, `ResetInteractor`, `RewindInteractor`, `SaveSceneInteractor`, ... |
 | 3 | Interface adapters | Convert data between use cases and the outside | controllers, presenters, view models |
-| 4 | Frameworks and drivers | Tools we don't own | Swing views, LLM HTTP calls, Open-Meteo, JSON files, `Main` |
+| 4 | Frameworks and drivers | Tools we don't own | Swing views, LLM HTTP calls, JSON files, `Main` |
 
 ### 8.2 The Dependency Rule (the one rule that matters most)
 
@@ -217,7 +221,6 @@ src/main/java/
     ...
   data_access/                 layer 4
     LlmTerrainSource.java             LLM HTTP call + JSON parsing
-    OpenMeteoTerrainSource.java       stretch: real terrain, same interface
     FileSceneDataAccess.java          JSON save/load
     InMemorySceneDataAccess.java      holds the current Scene and snapshots while the app runs
   view/                        layer 4
@@ -288,7 +291,7 @@ Every use case must have all of these pieces:
   No physics, no API calls, no `if` logic about the rules.
 - 3D drawing math (`Camera`) is a view detail. It turns world points into screen points. It is not physics.
 - Data access classes implement the use case interfaces. All HTTP, LLM, and JSON parsing stays here.
-- If we swap LLM providers, add Open-Meteo, or replace JSON with a database, only this layer changes.
+- If we swap LLM providers or replace JSON with a database, only this layer changes.
 
 ### 8.6 The Main component (wiring)
 
@@ -328,7 +331,7 @@ Whoever needs it first creates it. Others add their methods in their own PR.
 | Principle / pattern | Where we show it |
 |---|---|
 | Single Responsibility | One interactor per use case; controller, presenter, view each do one job |
-| Open/Closed | New terrain source (LLM, Open-Meteo) or physics engine = new class, no edits to interactors |
+| Open/Closed | New LLM provider or physics engine = new class, no edits to interactors |
 | Liskov Substitution | Fake and real terrain sources are fully interchangeable in tests |
 | Interface Segregation | One small data access interface per use case, not one big one |
 | Dependency Inversion | Interactors depend on interfaces they own; outer layers implement them |
@@ -368,7 +371,7 @@ Whoever needs it first creates it. Others add their methods in their own PR.
   instead of letting it go up. This is a cheap trick, not real wall collision.
 - Use a small fixed time step. After each step, if a ball is under the ground, put it back on top.
   This stops balls sinking or flying off.
-- At the grid edge, stop the ball (or remove it). Agree on one.
+- At the grid edge, clamp the ball inside the terrain and zero the velocity component pointing outward. Keep the ball in the scene, as implemented by `SimplePhysicsEngine`.
 
 Rule for the team: good-enough physics is fine.
 The grade is mostly about design. Don't spend weeks on accuracy.
@@ -388,7 +391,7 @@ The grade is mostly about design. Don't spend weeks on accuracy.
 
 | Person | Builds | Uses while teammates work |
 |---|---|---|
-| A: terrain | `Terrain`, `TerrainFeature`, `TerrainBuilder`, `SampleTerrains`, UC1 with `LlmTerrainSource`, `PromptPanel` + loading UI. Stretch: `OpenMeteoTerrainSource` | A fake terrain source and a flat preview |
+| A: terrain | `Terrain`, `TerrainFeature`, `TerrainBuilder`, `SampleTerrains`, UC1 with `LlmTerrainSource`, `PromptPanel` + loading UI | A fake terrain source and a flat preview |
 | B: dropping objects | `ObjectPreset` list, `ObjectListPanel`, drop speed, `MiniMapPanel` click to drop, UC2 | `SampleTerrains.hills()` and a paused scene |
 | C: simulation | `PhysicsEngine`, step, play/pause/stop, speed, `SceneSnapshot` + rewind, UC3 | `SampleTerrains.hills()` with a ball already on it |
 | D: persistence + 3D view | UC4 save/load, `TerrainView3D` and `Camera` (3D drawing) | A sample scene with terrain, balls, and settings |
@@ -417,10 +420,9 @@ D owns the 3D view because persistence is the smallest use case.
 
 ### 11.1 Cut list (cut from the top if we are behind)
 
-1. Open-Meteo real terrain (stretch)
-2. City wall bounce (cities still show, balls just roll over block edges)
-3. Rewind (stop/reset stays)
-4. Drag to rotate the camera (use one fixed angle)
+1. City wall bounce (cities still show, balls just roll over block edges)
+2. Rewind (stop/reset stays)
+3. Drag to rotate the camera (use one fixed angle)
 
 Never cut: generate terrain, drop objects, play/pause/stop, save/load. Those are our four user stories.
 
@@ -468,10 +470,8 @@ from a small Java main and print the JSON. If it follows the format every time, 
 
 ## 14. Future extensions
 
-- Real places from Open-Meteo (if cut from the MVP).
 - Objects that aren't spheres (boxes, cars) with rotation.
 - Ball-to-ball collisions.
 - Real wall collision for cities.
 - Bigger grids and smoother shading.
-- Live weather from Open-Meteo, like wind pushing the balls.
 - Share scenes with other users through an online store.

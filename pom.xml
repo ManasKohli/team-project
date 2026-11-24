@@ -14,7 +14,7 @@
     </properties>
 
     <dependencies>
-        <!-- JSON parsing for Open-Meteo responses and scene files (data_access/ only) -->
+        <!-- JSON parsing for planned LLM terrain responses and scene files (data_access/ only) -->
         <dependency>
             <groupId>org.json</groupId>
             <artifactId>json</artifactId>
