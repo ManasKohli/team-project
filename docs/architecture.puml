@@ -1,0 +1,104 @@
+@startuml architecture
+' Clean Architecture overview for the terrain physics sim (see plan.md section 8).
+' Every source-code arrow points inward. Dashed arrows with hollow heads are "implements".
+
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+skinparam packageStyle rectangle
+left to right direction
+
+package "Layer 4: Frameworks and drivers" as L4 #FDECEA {
+  package "app/" {
+    [Main] as Main
+    [AppBuilder] as AppBuilder
+  }
+  package "view/" {
+    [PromptPanel] as PromptPanel
+    [SimulationPanel\n(Swing Timer)] as SimulationPanel
+    [ControlsPanel] as ControlsPanel
+  }
+  package "data_access/" {
+    [LlmTerrainSource] as LlmSource
+    [FileSceneDataAccess] as FileDA
+    [InMemorySceneDataAccess] as MemDA
+  }
+}
+
+package "Layer 3: Interface adapters (interface_adapter/)" as L3 #FFF6DD {
+  [Controllers\nGenerateTerrain / DropBall / Step / SaveScene / LoadScene] as Controllers
+  [Presenters\nprepareSuccessView / prepareFailView] as Presenters
+  [ViewModels + State\nSimulationViewModel, GenerateTerrainState, ...] as ViewModels
+  [ViewManagerModel] as ViewManager
+}
+
+package "Layer 2: Use cases (use_case/)" as L2 #E6F4EA {
+  interface "InputBoundary" as InB
+  [Interactors\nGenerateTerrain / DropBall / Step / SaveScene / LoadScene] as Interactors
+  interface "OutputBoundary" as OutB
+  interface "DataAccessInterface\n(one small one per use case)" as DAI
+  [InputData / OutputData] as Data
+}
+
+package "Layer 1: Entities (entity/)" as L1 #E3EEFB {
+  [Terrain] as Terrain
+  [Ball] as Ball
+  [Scene] as Scene
+  [Vector3D] as Vec
+  interface "PhysicsEngine" as PE
+  [SimplePhysicsEngine] as SPE
+}
+
+cloud "LLM\nTerrain descriptions" as API
+database "Scene .json files" as Files
+
+' wiring
+Main --> AppBuilder
+AppBuilder ..> PromptPanel : builds
+AppBuilder ..> Controllers : builds
+AppBuilder ..> Interactors : builds
+AppBuilder ..> LlmSource : builds
+
+' views talk to adapters
+PromptPanel --> Controllers
+ControlsPanel --> Controllers
+SimulationPanel --> Controllers : tick: execute(dt)
+PromptPanel --> ViewModels : listens
+SimulationPanel --> ViewModels : listens
+
+' adapters talk to use cases
+Controllers --> InB
+Controllers --> Data
+Presenters ..|> OutB
+Presenters --> ViewModels
+Presenters --> Data
+
+' use cases
+Interactors ..|> InB
+Interactors --> OutB
+Interactors --> DAI
+Interactors --> Data
+Interactors --> Scene
+Interactors --> PE
+
+' data access implements use case interfaces
+LlmSource ..|> DAI
+FileDA ..|> DAI
+MemDA ..|> DAI
+LlmSource --> API : HTTP
+FileDA --> Files : JSON
+
+' entities
+Scene --> Terrain
+Scene --> Ball
+Ball --> Vec
+SPE ..|> PE
+
+legend right
+  Source-code dependencies only point inward:
+  Layer 4 -> 3 -> 2 -> 1.
+  Inner layers own interfaces; outer layers implement them.
+  Only Layer 4 imports Swing, HTTP, or JSON.
+endlegend
+
+@enduml
