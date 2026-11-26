@@ -3,6 +3,7 @@ package use_case.drop_object;
 import entity.Ball;
 import entity.BallFactory;
 import entity.Scene;
+import use_case.scene.SceneViewData;
 
 import java.util.Objects;
 
@@ -35,7 +36,7 @@ public final class DropObjectInteractor implements DropObjectInputBoundary {
         double y = inputData.getY();
 
         if (scene.getTerrain() == null || !dataAccess.isInsideTerrain(x, y)) {
-            outputBoundary.presentDropResult(new DropObjectOutputData(false));
+            outputBoundary.presentDropResult(new DropObjectOutputData(false, null));
             return;
         }
 
@@ -44,6 +45,6 @@ public final class DropObjectInteractor implements DropObjectInputBoundary {
                 inputData.getPreset(), x, y, groundHeight, inputData.getDropSpeed());
         scene.addBall(ball);
         dataAccess.saveCurrentScene(scene);
-        outputBoundary.presentDropResult(new DropObjectOutputData(true));
+        outputBoundary.presentDropResult(new DropObjectOutputData(true, SceneViewData.from(scene)));
     }
 }

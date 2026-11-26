@@ -26,6 +26,16 @@ public final class SceneViewData {
         return new SceneViewData(grid, balls);
     }
 
+    /** Builds display-only scene values directly from the current domain scene. */
+    public static SceneViewData from(Scene scene) {
+        HeightGrid grid = null;
+        if (scene.getTerrain() != null) {
+            grid = new HeightGrid(scene.getTerrain().getName(), scene.getTerrain().getCellSize(),
+                    scene.getTerrain().getHeights());
+        }
+        return from(scene, grid);
+    }
+
     public HeightGrid getTerrain() {
         return terrain;
     }

@@ -29,7 +29,7 @@ public final class SimulationState {
     }
 
     /** Same terrain with the balls moved, so the camera is not re-centred. */
-    SimulationState withBalls(List<SceneViewData.BallData> newBalls, String status) {
+    public SimulationState withBalls(List<SceneViewData.BallData> newBalls, String status) {
         return new SimulationState(terrain, toBalls(newBalls), status);
     }
 

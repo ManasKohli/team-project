@@ -4,6 +4,8 @@ import interface_adapter.simulation.CameraPose;
 import interface_adapter.simulation.ScenePresenter;
 import interface_adapter.simulation.SceneView;
 import interface_adapter.simulation.SimulationState;
+import interface_adapter.drop_object.DropObjectController;
+import interface_adapter.drop_object.DropObjectViewModel;
 
 import javax.swing.JButton;
 import javax.swing.JFileChooser;
@@ -26,11 +28,14 @@ public final class ScenePanel extends JPanel implements SceneView {
     private final JLabel status = new JLabel();
     private final JFileChooser chooser = new JFileChooser();
     private final TerrainView3D terrain;
+    private final DropObjectPanel dropObjects;
     private final Timer clock;
 
-    public ScenePanel(ScenePresenter presenter) {
+    public ScenePanel(ScenePresenter presenter, DropObjectController dropController,
+                      DropObjectViewModel dropViewModel) {
         super(new BorderLayout());
         terrain = new TerrainView3D(presenter);
+        dropObjects = new DropObjectPanel(dropController, dropViewModel);
         chooser.setFileFilter(new FileNameExtensionFilter("JSON scene files", "json"));
         JButton loadButton = new JButton("Load Scene");
         saveButton.addActionListener(event -> presenter.saveRequested());
@@ -53,6 +58,7 @@ public final class ScenePanel extends JPanel implements SceneView {
 
     public void addSimulationView() {
         add(terrain, BorderLayout.CENTER);
+        add(dropObjects, BorderLayout.EAST);
     }
 
     public void addFileControls() {
@@ -94,5 +100,6 @@ public final class ScenePanel extends JPanel implements SceneView {
         status.setText(state.getStatusText());
         saveButton.setEnabled(state.hasTerrain());
         terrain.display(state, camera);
+        dropObjects.setSimulationState(state);
     }
 }

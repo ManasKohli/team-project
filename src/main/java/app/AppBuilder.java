@@ -4,7 +4,11 @@ import data_access.FileSceneDataAccess;
 import data_access.FileSceneDataAccess.TerrainMapper;
 import data_access.InMemorySceneDataAccess;
 import entity.Scene;
+import entity.BallFactory;
 import entity.SimplePhysicsEngine;
+import interface_adapter.drop_object.DropObjectController;
+import interface_adapter.drop_object.DropObjectPresenter;
+import interface_adapter.drop_object.DropObjectViewModel;
 import interface_adapter.load_scene.LoadSceneController;
 import interface_adapter.save_scene.SaveSceneController;
 import interface_adapter.simulation.ScenePresenter;
@@ -12,6 +16,7 @@ import interface_adapter.simulation.SimulationController;
 import interface_adapter.simulation.SimulationState;
 import interface_adapter.simulation.SimulationViewModel;
 import use_case.load_scene.LoadSceneInteractor;
+import use_case.drop_object.DropObjectInteractor;
 import use_case.save_scene.SaveSceneInteractor;
 import use_case.scene.SceneViewData;
 import use_case.simulation.PlayInteractor;
@@ -32,7 +37,11 @@ public final class AppBuilder {
 
         SimulationViewModel viewModel = new SimulationViewModel(SimulationState.from(display, ""));
         ScenePresenter presenter = new ScenePresenter(viewModel);
-        app = new ScenePanel(presenter);
+        DropObjectViewModel dropViewModel = new DropObjectViewModel();
+        DropObjectController dropController = new DropObjectController(
+                new DropObjectInteractor(new BallFactory(),
+                        new DropObjectPresenter(dropViewModel, viewModel), scenes));
+        app = new ScenePanel(presenter, dropController, dropViewModel);
         SaveSceneController save = new SaveSceneController(new SaveSceneInteractor(files, presenter));
         LoadSceneController load = new LoadSceneController(new LoadSceneInteractor(files, presenter));
         SimulationController simulation = new SimulationController(
